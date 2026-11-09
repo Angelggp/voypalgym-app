@@ -28,7 +28,6 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
@@ -39,12 +38,18 @@ jobs:
           if not token or not chat:
               sys.exit("Faltan los secretos TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID")
 
-          # La Release (sirve igual al publicarla que al repetir el aviso a mano)
+          # La Release (sirve igual al publicarla que al repetir el aviso a mano). El repositorio es público: se lee
+          # sin clave (con la del workflow, GitHub a veces responde 404). Acepta «1.3.0», «v1.3.0» o con espacios.
+          wanted = os.environ["TAG"].strip()
+          wanted = wanted if wanted.lower().startswith("v") else f"v{wanted}"
           req = urllib.request.Request(
-              f"https://api.github.com/repos/{os.environ['REPO']}/releases/tags/{os.environ['TAG']}",
-              headers={"Authorization": f"Bearer {os.environ['GH_TOKEN']}", "Accept": "application/vnd.github+json"},
+              f"https://api.github.com/repos/{os.environ['REPO']}/releases?per_page=30",
+              headers={"Accept": "application/vnd.github+json", "User-Agent": "voypalgym-telegram"},
           )
-          release = json.load(urllib.request.urlopen(req))
+          releases = [r for r in json.load(urllib.request.urlopen(req)) if not r.get("draft")]
+          release = next((r for r in releases if r["tag_name"].lower() == wanted.lower()), None)
+          if release is None:
+              sys.exit(f"No encuentro la Release {wanted}. Las publicadas son: {', '.join(r['tag_name'] for r in releases) or 'ninguna'}")
           title = release.get("name") or release["tag_name"]
           body = release.get("body") or ""
 
